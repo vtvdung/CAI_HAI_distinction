@@ -6,7 +6,7 @@ library(naivebayes)
 
 
 # (1) Training data: MALDITOF
-load("../TRAINING DATA/MALDI/baseline.rda")
+load("baseline.rda")
 baseline.df <- baseline.df[,c("Sex","Age","AdmissionDate","AdmissionTime","ward","Specimen","Specimen.Origin","InfectionReason","GDetectedDate","GDetectedTime","BacName")]
 baseline.df$adm.growth <- (baseline.df$GDetectedDate - baseline.df$AdmissionDate)*24+ 
   ifelse(is.na(baseline.df$GDetectedTime - baseline.df$AdmissionTime),0,(baseline.df$GDetectedTime - baseline.df$AdmissionTime) )
@@ -80,17 +80,7 @@ testValues <- subset(predValues,dataType=="Test")
 confusionMatrix(testValues$obs,testValues$pred)
 
 
-# Example: test two models
-model.sex.age <- train(HAICAI~Sex+AgeCat,data = training, method = "svmRadial", trControl=bootControl)
-model.ward.bac <- train(HAICAI~BacGroup,data = training,method = "multinom", trControl=bootControl)
-models <- list(sa=model.sex.age,wb=model.ward.bac)
-#predict(models,newdata=testing)
-predValues <- extractPrediction(models,testX = testing,testY = testOutcome)
-testValues <- subset(predValues,dataType=="Test")
-pred.sex.age <- subset(testValues,object=sa)
-confusionMatrix(pred.sex.age$pred,pred.sex.age$obs)
-pred.wb <- subset(testValues,object=wb)
-confusionMatrix(pred.wb$pred,pred.wb$obs)
+
 
 
 # (6) importance of predictors
@@ -121,21 +111,4 @@ result.groupDM$BacGroup <- plyr::mapvalues(result.groupDM$Bacgroup,
 result.groupDM[,c("Sex","AgeCat","ward","Specimen","BacGroup")] <- apply(result.groupDM[,c("Sex","AgeCat","ward","Specimen","BacGroup")],2,as.character)
 
 # test scenarios
-table(predict(model.maldi,result.groupDM[,c("Sex","AgeCat","ward","Specimen","BacGroup")]))
-table(predict(model.maldi.bac,result.groupDM[,c("Sex","AgeCat","ward","Specimen","BacGroup")]))
-table(predict(model.maldi.spec,result.groupDM[,c("Sex","AgeCat","ward","Specimen","BacGroup")]))
-table(predict(model.maldi.ward,result.groupDM[,c("Sex","AgeCat","ward","Specimen","BacGroup")]))
-table(predict(model.maldi.spec.bac,result.groupDM[,c("Sex","AgeCat","ward","Specimen","BacGroup")])) # best one
-table(predict(model.maldi.ward.bac,result.groupDM[,c("Sex","AgeCat","ward","Specimen","BacGroup")]))
-table(predict(model.maldi.ward.spec,result.groupDM[,c("Sex","AgeCat","ward","Specimen","BacGroup")]))
-table(predict(model.maldi.ward.spec.bac,result.groupDM[,c("Sex","AgeCat","ward","Specimen","BacGroup")]))
 
-
-
-table(predict(model.maldi.icu,result.groupDM[result.groupDM$ward=="Critical Care",c("Sex","AgeCat","ward","Specimen","BacGroup")]))
-table(predict(model.maldi.NOTicu,result.groupDM[result.groupDM$ward!="Critical Care",c("Sex","AgeCat","ward","Specimen","BacGroup")]))
-
-
-result.groupDM$HAICAI <- predict(model.maldi.spec.bac,result.groupDM[,c("Sex","AgeCat","ward","Specimen","BacGroup")])
-
-save(result.groupDM,file = "vinares.HAICAI.imputed.rda")
