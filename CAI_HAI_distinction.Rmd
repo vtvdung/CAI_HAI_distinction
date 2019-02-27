@@ -1,0 +1,75 @@
+---
+title: "HAI CAI detection"
+author: "Dung Vu Tien Viet"
+date: "30 novembre 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+For the HAI/CAI detection, I use patient approach. That means I will evaluate each patient and decide that patient has CAI or HAI.
+
+I use a knowledge database that I collected from VINARES data, point-prevalence survey in ICU (also in VINARES project) data, also from other papers over the world.
+
+Each entry of this knowledge database will describe the probability of being in CAI if patients have one risk factor. 
+For example, among all patients carrying Acinetobacter spp. (it is the risk factor), there are 30% of patients have CAI (and 70% has HAI).
+So if I catch a patient with Acinetobacter spp., I will use a Bernoulli distribution with p=0.3 to generate a random value CAI/HAI for that patient.
+
+Next, if patient's sample is blood. An another entry in the knowledge database indicate that $p_{CAI}(blood)=0.4$.
+Now we have two indications (bacteria and specimen) to determine the CAI/HAI of that patient.
+
+My question is: *how to combine two indications?*
+
+
+We assume two factors A and B that correspond Acinetobacter spp. and blood; C is CAI. We have
+$ P(C|A)=0.3;\ P(C|B)=0.4 $, that means probability of having CAI in patients carrying Acinetobacter is 0.3 and probability of having CAI in patients were taken blood = 0.4.
+
+My question becomes the calculation of $P(C|(A\cap B))$.
+
+$$
+P(C|(A\cap B)) = \frac{P(C \cap (A \cap B))}{P(A \cap B)}
+$$
+$P(A \cap B) = P(A)*P(B)$ if A and B are independent. But it will be more difficult if A and B are dependent.
+
+$P(C \cap (A \cap B))=P(C \cap A \cap B)$ is even no way to find out.
+
+If I use Bayes' theorem,
+$$
+P(C|(A\cap B)) = \frac{P((A \cap B)|C)P(C)}{P(A \cap B)}
+$$
+I do not know either...
+
+*Further, how to deal with three indications?*
+
+
+I  stuck here. Do you have any idea or another approach?
+
+
+
+
+```{r echo=FALSE}
+#probability.CAI.HAI.factor <- 
+#probability.CAI.HAI.bacteria.ab <-
+
+# algorithm of HAI CAI
+# Function decides infection source of patient
+HAICAIdecision <- function(patient){
+# patient: a vector containing all information of patient
+  # Age, sex, hospial,ward, specimen type, bacteria
+  
+  
+  
+}
+
+# sensitivity of algorithm
+
+
+# end of function
+
+
+
+
+
+```
+
