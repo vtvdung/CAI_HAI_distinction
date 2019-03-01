@@ -68,8 +68,10 @@ inTrain <- createDataPartition(
   list = FALSE
 )
 
-training <- maldi[ inTrain,c("Sex","AgeCat","ward","Specimen","BacGroup","HAICAI")]
-#training <- maldi[ inTrain,]
+training <- as.data.frame(apply(maldi[ inTrain,c("Sex","AgeCat","ward","Specimen","BacGroup","HAICAI")],2,as.factor))
+
+
+
 testing  <- maldi[-inTrain,c("Sex","AgeCat","ward","Specimen","BacGroup")]
 #trainOutcome <- maldi$HAICAI[inTrain]
 testOutcome <- as.factor(maldi$HAICAI[-inTrain])
@@ -108,6 +110,43 @@ predict(all.svm.models, newdata=testing) %>% lapply(function(x){confusionMatrix(
 
 rbind(all.statistics.nb.models,all.statistics.svm.models) %>% as.data.frame() %>% mutate(method=rep(c("nb","svm"),each=31),
   model = as.vector(rep(generate_formula(input_vector = c("Sex","AgeCat","ward","Specimen","BacGroup")),2)),meanstat = (Sensitivity+Specificity+`Pos Pred Value`+`Neg Pred Value`)/4) -> all.statistics.all.models
+
+
+# (9) Predict VINARES result
+# (9.1) # load VINARES data
+VNRresult <- read.csv("vinares.result.csv",stringsAsFactors = F)
+VNRresult$AGE_GROUP[VNRresult$AGE_GROUP==""] <- NA
+VNRresult$Sex <- ifelse(VNRresult$SEX=="f","FEMALE",ifelse(VNRresult$SEX=="m","MALE",NA))
+VNRresult$AgeCat <- plyr::mapvalues(VNRresult$AGE_GROUP,
+                                         from = as.character(sort(unique(VNRresult$AGE_GROUP))),to = as.character(sort(unique(maldi$AgeCat))))
+VNRresult$ward <- ifelse(VNRresult$DEPARTMENT %in% 
+                                c("C?p C?", "cc", "CC", "ccdk", "cchs", "cctm","HS","hscc", "HSCC", "hsn","HSN", "hsng", "icu", "NICU"), "Critical Care","Other")
+
+VNRresult$Specimen <- ifelse(VNRresult$SPEC =='bl',"BLOOD",
+                                  ifelse(VNRresult$SPEC =='sf',"CSF","Other"))
+
+VNRresult$BacGroup <- plyr::mapvalues(VNRresult$Bacgroup,
+                                         from = as.character(sort(unique(VNRresult$Bacgroup))),
+                                         to = c("Acinetobacter baumannii","Escherichia coli",
+                                                "Others","Others","Others","Klebsiella pneumoniae",
+                                                "Others","Pseudomonas aeruginosa","Staphylococcus aureus",
+                                                "Streptococcus pneumoniae"))
+
+
+
+VNRresult[,c("Sex","AgeCat","ward","Specimen","BacGroup")] <- as.data.frame(lapply(c("Sex","AgeCat","ward","Specimen","BacGroup"),function(x){VNRresult[,x] <- factor(VNRresult[,x],levels = levels(training[,x]))}))
+
+
+#
+
+as.data.frame(is.na(VNRresult[,c("Sex","AgeCat","ward","Specimen","BacGroup")])) -> x
+apply(x,1,sum) ->y
+table(y)
+
+
+#best.model <- naive_bayes(HAICAI ~ Sex + AgeCat + ward + Specimen + BacGroup, data=training)
+best.model <- svm(HAICAI ~ Sex + AgeCat + ward + Specimen + BacGroup, data=training)
+y <- predict(best.model,VNRresult[,c("Sex","AgeCat","ward","Specimen","BacGroup")])
 
 
 ```
