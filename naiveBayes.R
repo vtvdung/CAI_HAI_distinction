@@ -70,14 +70,14 @@ list.method <- c("nb","svmRadial","lda","knn","multinom")
 all.models.methods <- expand.grid(generate_formula(c("Sex","AgeCat","ward","Specimen","BacGroup")),list.method)
 all.models.methods.for.testing <- expand.grid(generate_formula(c("Sex","AgeCat","ward","Specimen","BacGroup"))[c(1,28)],list.method)
 
-#call.train <- function(formula,method){
-#  train(as.formula(as.character(formula)),data = training,method = method)#, trControl=bootControl)
-#} 
+call.train <- function(formula,method){
+  train(as.formula(as.character(formula)),data = training,method = method)#, trControl=bootControl)
+} 
 
-#trained.models <- map2(all.models.methods$Var1,all.models.methods$Var2,call.train)
+trained.models <- map2(all.models.methods$Var1,all.models.methods$Var2,call.train)
 
 # (5) predict and cross-validation using testing data
-#trained.models %>% lapply(function(x){predict(x$finalModel,newdata=testing)})
+trained.models %>% lapply(function(x){predict(x$finalModel,newdata=testing)})
 
 predValues <- extractPrediction(trained.models.for.testing[1:3], testX = testing, testY = testOutcome)
 
