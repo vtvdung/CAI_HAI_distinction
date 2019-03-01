@@ -2,6 +2,7 @@ library(dplyr)
 library(caret)
 library(lubridate)
 library(naivebayes)
+library(purrr)
 "%ni%" <- Negate("%in%")
 
 
@@ -34,7 +35,9 @@ generate_formula <- function(input_vector){
     l[[i]] <-c(TRUE,FALSE) 
   }
 
-  l %>% expand.grid() %>% apply(1,function(x){paste("HAICAI ~ ",paste(input_vector[unlist(x)],collapse = " + "))})
+  l %>% expand.grid() %>% apply(1,function(x){paste("HAICAI ~ ",paste(input_vector[unlist(x)],collapse = " + "))})->all.models
+  
+  all.models[1:(2^length(input_vector)-1)]
   
 }
 
@@ -44,13 +47,13 @@ set.seed(111)
 inTrain <- createDataPartition(
   y = baseline.df$HAICAI,
   ## the outcome data are needed
-  p = .75,
+  p = .80,
   ## The percentage of data in the training set
   list = FALSE
 )
 
-#training_predictor <- baseline.df[ inTrain,c("Sex","AgeCat","ward","Specimen","BacGroup")]
-training <- baseline.df[ inTrain,]
+training <- baseline.df[ inTrain,c("Sex","AgeCat","ward","Specimen","BacGroup","HAICAI")]
+#training <- baseline.df[ inTrain,]
 #testing  <- baseline.df[-inTrain,c("Sex","AgeCat","ward","Specimen","BacGroup")]
 testing  <- baseline.df[-inTrain,c("Sex","AgeCat","ward","Specimen","BacGroup")]
 #trainOutcome <- baseline.df$HAICAI[inTrain]
@@ -58,21 +61,35 @@ testOutcome <- baseline.df$HAICAI[-inTrain]
 #prop.table(table(baseline.df$HAICAI))
 #prop.table(table(trainOutcome))
 
-bootControl <- trainControl(number = 100)
-list.method <- c("nb","svmRadial","lda","knn","mulinom")
-
-#nbfull <- train(x = training_predictor,y=trainOutcome,method = "nb", trControl=bootControl)
-#nbmodel <- train(HAICAI ~ Sex + AgeCat + ward + Specimen + BacGroup,data = training,method = "nb", trControl=bootControl)
+#bootControl <- trainControl(number = 100)
+list.method <- c("nb","svmRadial","lda","knn","multinom")
+#lda: cannot predict
 
 # (4) train all models
 
-  generate_formula(c("Sex","AgeCat","ward","Specimen","BacGroup"))[1:31] %>% 
-    lapply (function(x){train(as.formula(x),data = training,method = "nb", trControl=bootControl)}) -> all.models
+all.models.methods <- expand.grid(generate_formula(c("Sex","AgeCat","ward","Specimen","BacGroup")),list.method)
+all.models.methods.for.testing <- expand.grid(generate_formula(c("Sex","AgeCat","ward","Specimen","BacGroup"))[c(1,28)],list.method)
+
+#call.train <- function(formula,method){
+#  train(as.formula(as.character(formula)),data = training,method = method)#, trControl=bootControl)
+#} 
+
+#trained.models <- map2(all.models.methods$Var1,all.models.methods$Var2,call.train)
 
 # (5) predict and cross-validation using testing data
-all.models %>% lapply(function(x){predict(x$finalModel,newdata=testing)})
+#trained.models %>% lapply(function(x){predict(x$finalModel,newdata=testing)})
 
-predValues <- extractPrediction(all.models, testX = testing, testY = testOutcome)
+predValues <- extractPrediction(trained.models.for.testing[1:3], testX = testing, testY = testOutcome)
+
+nbmodel <- naive_bayes(HAICAI ~  Sex + AgeCat + ward + Specimen + BacGroup,data = training)
+
+caretcontrol <- trainControl(number = 200)
+caretmodel <- train(HAICAI ~ AgeCat,data = training, 
+                    method="gbm", trcontrol=caretcontrol)
+
+table(predict(nbmodel,newdata = testing))
+table(predict(caretmodel,newdata = testing))
+
 trainingValues <- subset(predValues,dataType=="Training")
 testValues <- subset(predValues,dataType=="Test")
 #by(testValues,testValues$object,function(x){confusionMatrix(x$obs,x$pred)})
