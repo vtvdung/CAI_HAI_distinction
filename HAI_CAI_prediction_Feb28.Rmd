@@ -1,0 +1,114 @@
+---
+title: "HAI CAI prediction"
+author: "Dung Vu Tien Viet"
+date: "28 février 2019"
+output: html_document
+---
+This document describes the prediction process of source of infection (HAI/CAI).
+
+The methods are in following steps:
+
+(1) Import the baseline data from MALDITOF project
+
+
+
+```{r, echo=FALSE}
+library(dplyr)
+library(caret)
+library(lubridate)
+library(naivebayes)
+library(e1071)
+library(purrr)
+"%ni%" <- Negate("%in%")
+###
+
+
+# (1) baseline data importation
+maldi <- read.csv("malditof.result.csv",stringsAsFactors = F)
+maldi <- maldi[,c("Sex","Age","AdmissionDate","AdmissionTime","ward","Specimen","Specimen.Origin","InfectionReason","GDetectedDate","GDetectedTime","BacName")]
+maldi$adm.growth <- (ymd(maldi$GDetectedDate) - ymd(maldi$AdmissionDate))*24+ 
+  ifelse(is.na(maldi$GDetectedTime - maldi$AdmissionTime),0,(maldi$GDetectedTime - maldi$AdmissionTime) )
+maldi$AgeCat <- cut(maldi$Age, breaks=c(-1,10, 20, 40, 60,100), right = TRUE)
+
+maldi$BacGroup <- as.character(maldi$BacName)
+maldi$BacGroup[maldi$BacName %ni% 
+                                 c("Escherichia coli","Streptococcus suis","Cryptococcus neoformans",
+                                   "Staphylococcus aureus","Klebsiella pneumoniae","Streptococcus suis type 2",
+                                   "Penicillium marneffei","Streptococcus pneumoniae","Salmonella sp.","Pseudomonas pseudomallei",
+                                   "Pseudomonas aeruginosa","Acinetobacter baumannii","Pseudomonas pseudomallei")] <- "Others"
+maldi$BacGroup[maldi$BacGroup=="Streptococcus suis type 2"] <- "Streptococcus suis" # correct S.suis name
+
+maldi$Specimen <- ifelse(maldi$Specimen.Origin %ni% c("BLOOD","CSF"),"Other",maldi$Specimen.Origin)
+maldi$HAICAI <- ifelse(maldi$adm.growth>48,"HAI","CAI")
+
+maldi[,c("Sex","AgeCat","ward","Specimen","BacGroup")] <- apply(maldi[,c("Sex","AgeCat","ward","Specimen","BacGroup")],2,as.character)
+
+
+# (2) generate models from predictors
+generate_formula <- function(input_vector){
+  # input_vector: a vector of all variable names
+  l <- list()
+  for (i in 1:length(input_vector)){
+    l[[i]] <-c(TRUE,FALSE) 
+  }
+
+  l %>% expand.grid() %>% apply(1,function(x){paste("HAICAI ~ ",paste(input_vector[unlist(x)],collapse = " + "))})->all.models
+  
+  all.models[1:(2^length(input_vector)-1)]
+  
+}
+
+# (3) prepare training and testing data
+set.seed(111)
+inTrain <- createDataPartition(
+  y = maldi$HAICAI,
+  ## the outcome data are needed
+  p = .80,
+  ## The percentage of data in the training set
+  list = FALSE
+)
+
+training <- maldi[ inTrain,c("Sex","AgeCat","ward","Specimen","BacGroup","HAICAI")]
+#training <- maldi[ inTrain,]
+testing  <- maldi[-inTrain,c("Sex","AgeCat","ward","Specimen","BacGroup")]
+#trainOutcome <- maldi$HAICAI[inTrain]
+testOutcome <- as.factor(maldi$HAICAI[-inTrain])
+
+list.method <- c("nb","svmRadial","lda","knn","multinom")
+
+# (4) train all models
+
+all.models.methods <- expand.grid(generate_formula(c("Sex","AgeCat","ward","Specimen","BacGroup")),list.method)
+
+all.models.methods.for.testing <- expand.grid(generate_formula(c("Sex","AgeCat","ward","Specimen","BacGroup")),list.method)
+
+# (5) Naive Bayes model
+
+generate_formula(input_vector = c("Sex","AgeCat","ward","Specimen","BacGroup")) %>% lapply(function(x)
+  {naive_bayes(as.formula(x),data = training)}) -> all.nb.models 
+
+# produce Sensitivity, Specificity, Pos Pred Value and Neg Pred Value of model
+predict(all.nb.models, newdata=testing) %>% lapply(function(x){confusionMatrix(x,testOutcome)$byClass[1:4]}) %>% as.data.frame %>%t-> all.statistics.nb.models
+
+
+
+
+# (6) SVM model
+training$HAICAI <- as.factor(training$HAICAI)
+generate_formula(input_vector = c("Sex","AgeCat","ward","Specimen","BacGroup")) %>% lapply(function(x) {svm(as.formula(x),data = training)}) -> all.svm.models 
+
+# produce Sensitivity, Specificity, Pos Pred Value and Neg Pred Value of model
+predict(all.svm.models, newdata=testing) %>% lapply(function(x){confusionMatrix(x,testOutcome)$byClass[1:4]}) %>% as.data.frame %>%t-> all.statistics.svm.models
+
+# (7) multinom model
+
+
+
+# (8) merge all statistics
+
+rbind(all.statistics.nb.models,all.statistics.svm.models) %>% as.data.frame() %>% mutate(method=rep(c("nb","svm"),each=31),
+  model = as.vector(rep(generate_formula(input_vector = c("Sex","AgeCat","ward","Specimen","BacGroup")),2)),meanstat = (Sensitivity+Specificity+`Pos Pred Value`+`Neg Pred Value`)/4) -> all.statistics.all.models
+
+
+```
+
