@@ -1,0 +1,183 @@
+---
+title: "HAI CAI prediction"
+author: "Dung Vu Tien Viet"
+date: "28 fÃ©vrier 2019"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r, echo=FALSE}
+library(DataExplorer) 
+library(dplyr) #mutate, arrange, 
+library(caret) # predict
+library(lubridate) #dmy
+library(naivebayes) # naive_bayes
+library(e1071) # svm
+library(class) # knn
+library(nnet) # multinom
+
+library(ggplot2) #ggplot
+library(knitr) #kable
+library(purrr)
+"%ni%" <- Negate("%in%")
+###
+```
+
+This document describes the prediction process of source of infection (HAI/CAI).
+
+The methods are in following steps:
+
+(1) Import the baseline data from MALDITOF project
+(2) Exploratory Data Analysis
+(3)
+
+
+```{r, echo=F}
+# (1) baseline data importation
+maldi <- read.csv("malditof.result.csv",stringsAsFactors = F)
+maldi <- maldi[,c("Sex","Age","AdmissionDate","AdmissionTime","ward","Specimen","Specimen.Origin","InfectionReason","GDetectedDate","GDetectedTime","BacName")]
+maldi$adm.growth <- (ymd(maldi$GDetectedDate) - ymd(maldi$AdmissionDate))*24+ 
+  ifelse(is.na(maldi$GDetectedTime - maldi$AdmissionTime),0,(maldi$GDetectedTime - maldi$AdmissionTime) )
+maldi$AgeCat <- cut(maldi$Age, breaks=c(-1,10, 20, 40, 60,100), right = TRUE)
+
+maldi$BacGroup <- as.character(maldi$BacName)
+maldi$BacGroup[maldi$BacName %ni% 
+                                 c("Escherichia coli","Streptococcus suis","Cryptococcus neoformans",
+                                   "Staphylococcus aureus","Klebsiella pneumoniae","Streptococcus suis type 2",
+                                   "Penicillium marneffei","Streptococcus pneumoniae","Salmonella sp.","Pseudomonas pseudomallei",
+                                   "Pseudomonas aeruginosa","Acinetobacter baumannii","Pseudomonas pseudomallei")] <- "Others"
+maldi$BacGroup[maldi$BacGroup=="Streptococcus suis type 2"] <- "Streptococcus suis" # correct S.suis name
+
+maldi$Specimen <- ifelse(maldi$Specimen.Origin %ni% c("BLOOD","CSF"),"Other",maldi$Specimen.Origin)
+maldi$HAICAI <- ifelse(maldi$adm.growth>48,"HAI","CAI")
+
+maldi[,c("Sex","AgeCat","ward","Specimen","BacGroup")] <- apply(maldi[,c("Sex","AgeCat","ward","Specimen","BacGroup")],2,as.factor)
+```
+
+VINARES importation
+
+```{r, echo=FALSE}
+VNRresult <- read.csv("vinares.result.csv",stringsAsFactors = F)
+VNRresult$AGE_GROUP[VNRresult$AGE_GROUP==""] <- NA
+VNRresult$Sex <- ifelse(VNRresult$SEX=="f","FEMALE",ifelse(VNRresult$SEX=="m","MALE",NA))
+VNRresult$AgeCat <- plyr::mapvalues(VNRresult$AGE_GROUP,
+                                         from = levels(factor(VNRresult$AGE_GROUP)),to = sort(unique(maldi$AgeCat)))
+VNRresult$ward <- ifelse(VNRresult$DEPARTMENT %in% 
+                                c("C?p C?", "cc", "CC", "ccdk", "cchs", "cctm","HS","hscc", "HSCC", "hsn","HSN", "hsng", "icu", "NICU"), "Critical Care","Other")
+
+VNRresult$Specimen <- ifelse(VNRresult$SPEC =='bl',"BLOOD",
+                                  ifelse(VNRresult$SPEC =='sf',"CSF","Other"))
+
+VNRresult$BacGroup <- plyr::mapvalues(VNRresult$Bacgroup,
+                                         from = as.character(sort(unique(VNRresult$Bacgroup))),
+                                         to = c("Acinetobacter baumannii","Escherichia coli",
+                                                "Others","Others","Others","Klebsiella pneumoniae",
+                                                "Others","Pseudomonas aeruginosa","Staphylococcus aureus",
+                                                "Streptococcus pneumoniae"))
+
+
+
+#VNRresult[,c("Sex","AgeCat","ward","Specimen","BacGroup")] <- as.data.frame(lapply(c("Sex","AgeCat","ward","Specimen","BacGroup"),function(x){VNRresult[,x] <- factor(VNRresult[,x],levels = levels(input.data[,x]))}))
+
+```
+
+```{r, echo=F}
+#(2) Explainatory Data Analysis
+
+# predict VINARES dataset: use blood and CSF only
+input.data <- maldi[maldi$Specimen %in% c("BLOOD","CSF"),c("Sex","Age","AgeCat","ward","Specimen","BacName","BacGroup","AdmissionDate","adm.growth","HAICAI")]
+plot_str(input.data)
+plot_missing(input.data)
+plot_bar(input.data)
+# correlation btw variables
+chisq.test(input.data$Specimen,input.data$BacGroup)
+chisq.test(input.data$ward,input.data$BacGroup)
+chisq.test(input.data$Specimen,input.data$ward)
+create_report(input.data)
+```
+
+```{r, echo=F}
+# (3) generate models from predictors
+generate_formula <- function(input_vector){
+  # input_vector: a vector of all variable names
+  l <- list()
+  for (i in 1:length(input_vector)){
+    l[[i]] <-c(TRUE,FALSE) 
+  }
+
+  l %>% expand.grid() %>% apply(1,function(x){paste("HAICAI ~ ",paste(input_vector[unlist(x)],collapse = " + "))})->all.models
+  
+  all.models[1:(2^length(input_vector)-1)]
+  
+}
+```
+
+
+Write a function that estimates accuracy of all models and predict the HAICAI. 
+
+Input: training data, data need to predict HAICAI, vector of predictor variables and classification methods will be used
+
+Output: a list of (1) accuracy of models and (2) HAICAI prediction of all models
+
+```{r, echo=FALSE}
+
+pred.multiple.models <- function(training,data.to.predict,predictors,classification.methods){
+  # (1) all combinations of formulas and methods
+  all.formulas.methods <- expand.grid(generate_formula(predictors),classification.methods)
+  # (2) estimate accuracy of models
+    set.seed(1)
+  train_control <- trainControl(method="repeatedcv", number = 2, repeats=2)
+  
+  call.train <- function(formula,method){
+  train(as.formula(as.character(formula)),data=training,method = method, trControl=train_control)}
+  
+  map2(all.formulas.methods$Var1,all.formulas.methods$Var2,call.train) -> all.models
+  all.models %>% lapply(function(x){max(x$results$Accuracy)}) %>% as.data.frame %>% t -> accuracy
+  all.formulas.methods %>% mutate(max.accuracy = accuracy) -> all.formulas.methods
+  #(3) predict and return results
+  list(accuracy=all.formulas.methods,pred=predict(all.models,data.to.predict))
+}
+
+x <- pred.multiple.models(training = maldi[maldi$Specimen %in% c("BLOOD","CSF"),c("Specimen","ward","BacGroup","HAICAI")],data.to.predict = VNRresult[VNRresult$Specimen %in% c("BLOOD","CSF"),c("Specimen","ward","BacGroup")],predictors = c("ward","BacGroup"),classification.methods = c("multinom","adaboost"))
+
+```
+
+
+Compare data distribution between MALDITOF and VINARES
+
+```{r,echo=F}
+prop.table(table(maldi[,c("Specimen","BacGroup")])) %>% as.data.frame %>% arrange(Freq) %>%
+  (function(x){ggplot(data = x,aes(Specimen,BacGroup,fill=Freq))+geom_tile()+ scale_fill_gradient(low = "white", high = "red")})
+
+prop.table(table(VNRresult[,c("Specimen","BacGroup")])) %>% as.data.frame %>% arrange(Freq) %>%
+  (function(x){ggplot(data = x,aes(Specimen,BacGroup,fill=Freq))+geom_tile()+ scale_fill_gradient(low = "white", high = "red")})
+
+```
+
+Compare HAI/CAI distribution between MALDITOF and VINARES
+
+```{r,echo=F}
+
+kable(cbind(as.data.frame(table(maldi[maldi$HAICAI=="HAI",c("Specimen","BacGroup")])),
+                    as.data.frame(table(maldi[,c("Specimen","BacGroup")]))))
+
+kable(table(maldi[maldi$HAICAI=="HAI",c("Specimen","BacGroup")])/table(maldi[,c("Specimen","BacGroup")]))
+
+as.data.frame(table(maldi[maldi$HAICAI=="HAI",c("Specimen","BacGroup")])/table(maldi[,c("Specimen","BacGroup")])) %>% arrange(Freq) %>%
+  (function(x){ggplot(data = x,aes(Specimen,BacGroup,fill=Freq))+geom_tile()+ scale_fill_gradient(low = "white", high = "red")})
+
+
+### VINARES
+
+kable(cbind(as.data.frame(table(VNRresult[VNRresult$HAICAI=="HAI",c("Specimen","BacGroup")])),
+                    as.data.frame(table(VNRresult[,c("Specimen","BacGroup")]))))
+
+
+kable(table(VNRresult[VNRresult$HAICAI=="HAI",c("Specimen","BacGroup")])/table(VNRresult[,c("Specimen","BacGroup")]))
+
+as.data.frame(table(VNRresult[VNRresult$HAICAI=="HAI",c("Specimen","BacGroup")])/table(VNRresult[,c("Specimen","BacGroup")])) %>% arrange(Freq) %>%
+  (function(x){ggplot(data = x,aes(Specimen,BacGroup,fill=Freq))+geom_tile()+ scale_fill_gradient(low = "white", high = "red")})
+
+
+```
