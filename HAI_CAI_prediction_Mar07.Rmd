@@ -29,8 +29,9 @@ This document describes the prediction process of source of infection (HAI/CAI).
 The methods are in following steps:
 
 (1) Import the baseline data from MALDITOF project
-(2) Exploratory Data Analysis
-(3)
+(2) Exploratory Data Analysis: analyse a subset of blood and CSF of malditof 
+(3) Import VINARES project
+(4) 
 
 
 ```{r, echo=F}
@@ -125,7 +126,7 @@ Output: a list of (1) accuracy of models and (2) HAICAI prediction of all models
 pred.multiple.models <- function(training,data.to.predict,predictors,classification.methods){
   # (1) all combinations of formulas and methods
   all.formulas.methods <- expand.grid(generate_formula(predictors),classification.methods)
-  # (2) estimate accuracy of models
+  # (2) build model
     set.seed(1)
   train_control <- trainControl(method="repeatedcv", number = 2, repeats=2)
   
@@ -133,9 +134,15 @@ pred.multiple.models <- function(training,data.to.predict,predictors,classificat
   train(as.formula(as.character(formula)),data=training,method = method, trControl=train_control)}
   
   map2(all.formulas.methods$Var1,all.formulas.methods$Var2,call.train) -> all.models
+  # estimate accuracy of models and predict
+  
+  pred <- predict(all.models,data.to.predict)
+  pred %>% lapply(function(x){table(x)["HAI"]}) %>% as.data.frame %>% t -> HAI
+  
   all.models %>% lapply(function(x){max(x$results$Accuracy)}) %>% as.data.frame %>% t -> accuracy
-  all.formulas.methods %>% mutate(max.accuracy = accuracy) -> all.formulas.methods
-  #(3) predict and return results
+  all.formulas.methods %>% mutate(max.accuracy = accuracy,HAInum=HAI) -> all.formulas.methods
+    
+  
   list(accuracy=all.formulas.methods,pred=predict(all.models,data.to.predict))
 }
 
